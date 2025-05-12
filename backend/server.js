@@ -2,7 +2,6 @@ const express = require("express");
 const multer = require("multer");
 const cors = require("cors");
 const fs = require("fs");
-const path = require("path");
 const pdfParse = require("pdf-parse");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
@@ -15,35 +14,49 @@ const genAI = new GoogleGenerativeAI("AIzaSyCeVpAQrxwHuIqvas1fs4fAkByupuXPNAU");
 
 let allPdfText = "";
 
+// Upload route
 app.post("/upload", upload.array("pdfs"), async (req, res) => {
-  const files = req.files;
-  allPdfText = "";
+  try {
+    const files = req.files;
+    allPdfText = "";
 
-  for (const file of files) {
-    const dataBuffer = fs.readFileSync(file.path);
-    const data = await pdfParse(dataBuffer);
-    allPdfText += data.text + "\n\n";
-    fs.unlinkSync(file.path); // Clean up
+    for (const file of files) {
+      const dataBuffer = fs.readFileSync(file.path);
+      const data = await pdfParse(dataBuffer);
+      allPdfText += data.text + "\n\n";
+      fs.unlinkSync(file.path); // Remove temp file
+    }
+
+    res.json({ status: "PDFs processed" });
+  } catch (error) {
+    console.error("Upload error:", error);
+    res.status(500).json({ error: "Failed to process PDFs." });
   }
-
-  res.json({ status: "PDFs processed" });
 });
 
+// Ask route
 app.post("/ask", async (req, res) => {
   const { question } = req.body;
-  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-  const prompt = `You are answering based only on the uploaded textbook content. Here's the content:\n\n"${allPdfText}"\n\nQuestion: ${question}`;
+  if (!allPdfText.trim()) {
+    return res.status(400).json({ error: "No PDF content uploaded yet." });
+  }
 
   try {
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const prompt = `Use only the following textbook content to answer the question.\n\nContent:\n${allPdfText}\n\nQuestion: ${question}`;
+
     const result = await model.generateContent(prompt);
     const response = await result.response;
     res.json({ answer: response.text() });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("Gemini error:", err);
+    res.status(500).json({ error: "Failed to generate answer." });
   }
 });
 
-app.listen(5000, () => {
-  console.log("Backend server running on http://localhost:5000");
+// Dynamic port for Render
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
